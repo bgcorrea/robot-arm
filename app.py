@@ -57,7 +57,7 @@ def main() -> None:
                 robot.apply_arm(arm)
 
             _draw_hud(frame, loco, arm, connected=robot is not None)
-            cv2.imshow("Robot PIA", frame)
+            cv2.imshow("robot-arm", frame)
 
             if cv2.waitKey(1) & 0xFF == ord("q"):
                 break
