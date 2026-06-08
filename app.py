@@ -1,4 +1,5 @@
 import platform
+import traceback
 import cv2
 import mediapipe as mp
 
@@ -34,11 +35,16 @@ def main() -> None:
         return
     print("Cámara iniciada. Presiona 'q' para salir.")
 
+    frame_count = 0
     try:
         while True:
             ok, frame = cap.read()
             if not ok:
                 continue
+
+            frame_count += 1
+            if frame_count % 30 == 1:
+                print(f"Frame #{frame_count} OK")
 
             frame = cv2.flip(frame, 1)
             loco, arm = _process_frame(frame, hands)
@@ -56,6 +62,8 @@ def main() -> None:
             if cv2.waitKey(1) & 0xFF == ord("q"):
                 break
 
+    except Exception:
+        traceback.print_exc()
     finally:
         cap.release()
         cv2.destroyAllWindows()
