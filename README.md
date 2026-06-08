@@ -22,7 +22,7 @@ Controla un robot **Makeblock Ultimate 2.0 + MegaPi** con gestos capturados por 
 
 ```bash
 # 1. Clonar el repositorio
-git clone <url-del-repo>
+git clone https://github.com/bgcorrea/robot-arm
 cd robot-pia
 
 # 2. Crear entorno virtual
