@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Robot Arm · Control</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+
+  <header>
+    <div class="logo">&#x1F916; Robot Arm</div>
+    <div class="status-bar">
+      <div class="status-item">
+        <span class="dot" id="robot-dot"></span>
+        <span id="robot-label">Robot offline</span>
+      </div>
+      <div class="status-item">
+        <span class="dot" id="camera-dot"></span>
+        <span id="camera-label">Cámara inactiva</span>
+      </div>
+    </div>
+  </header>
+
+  <main>
+
+    <!-- ── Camera panel ──────────────────────────────────── -->
+    <section class="panel camera-panel">
+      <div class="panel-header">
+        <span>Vista de gestos</span>
+        <button id="camera-btn" class="btn">Activar cámara</button>
+      </div>
+      <div class="camera-wrap">
+        <video id="video" playsinline autoplay muted></video>
+        <canvas id="canvas"></canvas>
+        <div id="no-cam">
+          <div class="no-cam-icon">&#x1F4F7;</div>
+          <p>Activa la cámara para control por gestos</p>
+          <p class="hint">O usa los controles manuales &#x2192;</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Side panel ────────────────────────────────────── -->
+    <aside class="side-panel">
+
+      <!-- Current gesture state -->
+      <div class="panel state-panel">
+        <div class="panel-header">Estado actual</div>
+        <div class="state-cards">
+          <div class="state-card loco" id="loco-card">
+            <div class="card-label">Mano derecha · Locomoción</div>
+            <div class="card-gesture" id="loco-name">—</div>
+            <div class="card-desc" id="loco-desc">Sin gesto</div>
+          </div>
+          <div class="state-card arm" id="arm-card">
+            <div class="card-label">Mano izquierda · Brazo</div>
+            <div class="card-gesture" id="arm-name">—</div>
+            <div class="card-desc" id="arm-desc">Sin gesto</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Manual controls -->
+      <div class="panel controls-panel">
+        <div class="panel-header">Control manual</div>
+        <div class="controls-body">
+
+          <div class="ctrl-col">
+            <div class="ctrl-title">Locomoción</div>
+            <div class="dpad">
+              <button class="dpad-btn" data-loco="FORWARD"    style="grid-area:up">&#x2191;</button>
+              <button class="dpad-btn" data-loco="TURN_LEFT"  style="grid-area:lf">&#x2190;</button>
+              <button class="dpad-btn stop" data-loco="STOP"  style="grid-area:ct">&#x25A0;</button>
+              <button class="dpad-btn" data-loco="TURN_RIGHT" style="grid-area:rt">&#x2192;</button>
+              <button class="dpad-btn" data-loco="BACKWARD"   style="grid-area:dn">&#x2193;</button>
+            </div>
+          </div>
+
+          <div class="ctrl-col">
+            <div class="ctrl-title">Brazo</div>
+            <div class="arm-btns">
+              <button class="arm-btn" data-arm="SHOULDER_UP">&#x2191; Hombro</button>
+              <button class="arm-btn" data-arm="SHOULDER_DOWN">&#x2193; Hombro</button>
+              <button class="arm-btn" data-arm="GRIP_OPEN">&#x25CB; Abrir pinza</button>
+              <button class="arm-btn" data-arm="GRIP_CLOSE">&#x25CF; Cerrar pinza</button>
+            </div>
+          </div>
+
+        </div>
+        <div class="kbd-hint">Teclado: W A S D &nbsp;·&nbsp; R F &nbsp;·&nbsp; Q E (pinza)</div>
+      </div>
+
+      <!-- Gesture guide -->
+      <div class="panel guide-panel">
+        <div class="panel-header">Guía de gestos</div>
+        <div class="guide-body">
+          <div class="guide-col">
+            <div class="guide-title">&#x270B; Derecha · Locomoción</div>
+            <div class="guide-row"><span>&#x270A;</span>Stop</div>
+            <div class="guide-row"><span>&#x1F590;</span>Adelante</div>
+            <div class="guide-row"><span>&#x261D;&#xFE0F;</span>Girar izq.</div>
+            <div class="guide-row"><span>&#x270C;&#xFE0F;</span>Girar der.</div>
+            <div class="guide-row"><span>3&#x2191;</span>Atrás</div>
+          </div>
+          <div class="guide-col">
+            <div class="guide-title">&#x1F91A; Izquierda · Brazo</div>
+            <div class="guide-row"><span>&#x270A;</span>Home</div>
+            <div class="guide-row"><span>&#x261D;&#xFE0F;</span>Hombro &#x2191;</div>
+            <div class="guide-row"><span>&#x270C;&#xFE0F;</span>Hombro &#x2193;</div>
+            <div class="guide-row"><span>&#x1F90F;</span>Cerrar pinza</div>
+            <div class="guide-row"><span>4&#x2191;</span>Abrir pinza</div>
+          </div>
+        </div>
+      </div>
+
+    </aside>
+  </main>
+
+  <script type="module" src="js/control.js"></script>
+</body>
+</html>
