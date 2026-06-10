@@ -23,8 +23,8 @@ def run(*args, **kwargs):
     if result.returncode != 0:
         sys.exit(result.returncode)
 
-print("Instalando PyInstaller...")
-run(sys.executable, "-m", "pip", "install", "pyinstaller", "--quiet")
+print("Instalando dependencias...")
+run(sys.executable, "-m", "pip", "install", "bleak", "websockets", "pyinstaller", "--quiet")
 
 extra = ["--collect-all", "winrt"] if sys.platform == "win32" else []
 

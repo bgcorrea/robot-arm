@@ -1,0 +1,46 @@
+name: Build robot-agent
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            artifact: robot-agent.exe
+          - os: macos-latest
+            artifact: robot-agent
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Instalar dependencias
+        run: pip install bleak websockets pyinstaller
+
+      - name: Compilar
+        run: python build/build.py
+
+      - name: Subir a Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/${{ matrix.artifact }}
+          body: |
+            ## Cómo usar
+
+            1. Descargá el archivo para tu sistema operativo
+            2. Creá un archivo `.env` en la misma carpeta con:
+               ```
+               RELAY_URL=wss://robot-arm-test.up.railway.app/ws/agent
+               BLE_ADDRESS=70:3E:97:93:29:A5
+               ```
+            3. Doble click en el ejecutable — conecta el robot automáticamente
