@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from __future__ import annotations
 """
 Local robot agent.
 
@@ -11,6 +12,7 @@ Usage
     python agent.py
 """
 import asyncio
+import inspect
 import json
 import os
 import sys
@@ -24,7 +26,6 @@ except ImportError:
     sys.exit(1)
 
 from gesture.recognizer import ArmGesture, LocoGesture
-from robot.controller import RobotController
 
 RELAY_URL  = os.getenv("RELAY_URL", "").strip()
 CONTROL_HZ = 30  # rate at which we tick the robot control loop (keeps gripper state machine alive)
@@ -35,6 +36,10 @@ def _parse_args():
     p.add_argument("--port", default=None,
                    help="Puerto serial explícito (ej: /dev/ttyUSB0, /dev/ttyS7, COM5). "
                         "Equivalente a setear ROBOT_PORT.")
+    p.add_argument("--ble", action="store_true",
+                   help="Conectar via Bluetooth BLE en lugar de serial. "
+                        "Requiere bleak (pip install bleak) y ejecutarse en Windows. "
+                        "Usa BLE_WRITE_UUID y BLE_ADDRESS para configurar el dispositivo.")
     return p.parse_args()
 
 
@@ -45,15 +50,21 @@ async def _session(relay_url: str, robot: RobotController | None) -> None:
         "arm":  ArmGesture.UNKNOWN,
     }
 
+    async def _rcall(fn, *args) -> None:
+        """Llama fn(*args); si devuelve una coroutine la awaita (soporta serial y BLE)."""
+        result = fn(*args)
+        if inspect.isawaitable(result):
+            await result
+
     async def control_loop() -> None:
         """Ticks the robot at CONTROL_HZ so the gripper timer fires correctly."""
         while True:
             if robot:
                 if state["loco"] is LocoGesture.UNKNOWN:
-                    robot.stop()
+                    await _rcall(robot.stop)
                 else:
-                    robot.apply_loco(state["loco"])
-                robot.apply_arm(state["arm"])
+                    await _rcall(robot.apply_loco, state["loco"])
+                await _rcall(robot.apply_arm, state["arm"])
             await asyncio.sleep(1 / CONTROL_HZ)
 
     async def ws_loop() -> None:
@@ -90,6 +101,31 @@ async def _run_forever(relay_url: str, robot: RobotController | None) -> None:
             await asyncio.sleep(5)
 
 
+async def _async_main(args) -> None:
+    robot = None
+    try:
+        if args.ble:
+            from robot.ble_controller import BleRobotController
+            robot = BleRobotController()
+            await robot.connect()
+        else:
+            from robot.controller import RobotController
+            robot = RobotController()
+            print(f"Conectando al robot en {robot._port}…")
+            robot.connect()
+        print("Robot conectado.")
+    except Exception as exc:
+        print(f"Robot no disponible ({exc}) — modo demo (sin hardware)")
+
+    try:
+        await _run_forever(RELAY_URL, robot)
+    finally:
+        if robot:
+            result = robot.disconnect()
+            if inspect.isawaitable(result):
+                await result
+
+
 def main() -> None:
     args = _parse_args()
 
@@ -98,26 +134,13 @@ def main() -> None:
         print("  export RELAY_URL=wss://your-app.railway.app/ws/agent")
         sys.exit(1)
 
-    # --port flag overrides ROBOT_PORT env var and auto-detection
     if args.port:
         os.environ["ROBOT_PORT"] = args.port
 
-    robot: RobotController | None = None
     try:
-        robot = RobotController()
-        print(f"Conectando al robot en {robot._port}…")
-        robot.connect()
-        print("Robot conectado.")
-    except Exception as exc:
-        print(f"Robot no disponible ({exc}) — modo demo (sin hardware)")
-
-    try:
-        asyncio.run(_run_forever(RELAY_URL, robot))
+        asyncio.run(_async_main(args))
     except KeyboardInterrupt:
         print("\nStopping agent…")
-    finally:
-        if robot:
-            robot.disconnect()
 
 
 if __name__ == "__main__":
