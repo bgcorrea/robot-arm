@@ -28,14 +28,22 @@ def _setup() -> None:
         print("=" * 50)
         print("  Primera configuración del agente Robot Arm")
         print("=" * 50)
-        url = input("\nURL del relay (ej: wss://robot-arm-test.up.railway.app/ws/agent)\n> ").strip()
+        print("\nIngresá la URL del sitio web del robot.")
+        print("Ejemplo: robot-arm-test.up.railway.app")
+        url = input("\n> ").strip().rstrip("/")
         if not url:
             print("URL requerida. Saliendo.")
             sys.exit(1)
+        # Normalizar: quitar esquema si lo pusieron, agregar wss:// y /ws/agent
+        url = url.replace("https://", "").replace("http://", "").replace("wss://", "").replace("ws://", "")
+        if not url.endswith("/ws/agent"):
+            url = url + "/ws/agent"
+        url = "wss://" + url
         os.environ["RELAY_URL"] = url
         with open(env_file, "a", encoding="utf-8") as f:
             f.write(f"RELAY_URL={url}\n")
-        print(f"\nGuardado en {env_file}. No se te pedirá de nuevo.\n")
+        print(f"\nConectando a: {url}")
+        print(f"Guardado en {env_file}. No se te pedirá de nuevo.\n")
 
     # Forzar modo BLE
     sys.argv = [sys.argv[0], "--ble"]
