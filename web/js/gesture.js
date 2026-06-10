@@ -1,22 +1,15 @@
 /**
- * gesture.js — hand detection + gesture recognition, main thread.
+ * gesture.js — adaptive hand detection, no pre-loaded libraries.
  *
- * Two independent loops keep the UI smooth:
- *   renderLoop   — rAF at ~60 fps, only redraws cached landmarks, never calls MediaPipe.
- *   detectLoop   — async/setTimeout at ≤15 fps, runs MediaPipe then yields via await so
- *                  the browser can paint frames and handle events between detections.
+ * Backend selection (decided at camera-activation time):
+ *   WebGL 2 available → @mediapipe/tasks-vision  (GPU, ~15 fps, any real device)
+ *   No WebGL 2        → TF.js WASM/CPU + hand-pose-detection (~8 fps, works in WSL2)
  *
- * Canvas dimensions are only updated when the video resolution actually changes,
- * avoiding the expensive canvas-reset-every-frame that caused the original slowness.
+ * Libraries are loaded on demand — nothing is fetched until the user clicks
+ * "Activar cámara", so page load stays fast.
  */
 
-import { HandLandmarker, FilesetResolver } from
-  "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
-
-const WASM_PATH  = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm";
-const MODEL_PATH = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
-
-// ── Gesture enums (port of gesture/recognizer.py) ─────────────────────────────
+// ── Gesture enums (mirrors gesture/recognizer.py) ─────────────────────────────
 export const LocoGesture = Object.freeze({
   UNKNOWN: "UNKNOWN", STOP: "STOP", FORWARD: "FORWARD",
   BACKWARD: "BACKWARD", TURN_LEFT: "TURN_LEFT", TURN_RIGHT: "TURN_RIGHT",
@@ -46,11 +39,11 @@ function pinchDist(lm) {
 export function recognizeLoco(lm, h) {
   const up = fingersUp(lm, h);
   const [, i, m, r, p] = up;
-  if (!i && !m && !r && !p) return LocoGesture.STOP;  // fist — thumb ignored (unreliable in fist)
-  if (up.every(Boolean))   return LocoGesture.FORWARD;
-  if (i && !m && !r && !p) return LocoGesture.TURN_LEFT;
-  if (i &&  m && !r && !p) return LocoGesture.TURN_RIGHT;
-  if (i &&  m &&  r && !p) return LocoGesture.BACKWARD;
+  if (!i && !m && !r && !p) return LocoGesture.STOP;
+  if (up.every(Boolean))    return LocoGesture.FORWARD;
+  if (i && !m && !r && !p)  return LocoGesture.TURN_LEFT;
+  if (i &&  m && !r && !p)  return LocoGesture.TURN_RIGHT;
+  if (i &&  m &&  r && !p)  return LocoGesture.BACKWARD;
   return LocoGesture.UNKNOWN;
 }
 export function recognizeArm(lm, h) {
@@ -68,7 +61,7 @@ export function recognizeArm(lm, h) {
   return ArmGesture.UNKNOWN;
 }
 
-// ── Hand drawing (no DrawingUtils dependency — lighter) ───────────────────────
+// ── Hand drawing ──────────────────────────────────────────────────────────────
 const CONNECTIONS = [
   [0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],
   [9,13],[13,14],[14,15],[15,16],[13,17],[0,17],[17,18],[18,19],[19,20],
@@ -91,26 +84,80 @@ function drawHand(ctx, lm, isRight, w, h) {
   }
 }
 
-// ── MediaPipe — starts loading as soon as this module is imported ─────────────
-const PROC_W = 320, PROC_H = 240;
-const DETECT_MS = 66;  // ≤15 fps detection rate
+// ── Utilities ─────────────────────────────────────────────────────────────────
+function hasWebGL2() {
+  try { return !!document.createElement("canvas").getContext("webgl2"); }
+  catch { return false; }
+}
 
-let handLandmarker = null;
-const _mpReady = (async () => {
-  const resolver = await FilesetResolver.forVisionTasks(WASM_PATH);
-  handLandmarker = await HandLandmarker.createFromOptions(resolver, {
-    baseOptions: { modelAssetPath: MODEL_PATH, delegate: "CPU" },
-    runningMode: "VIDEO",
-    numHands: 2,
+function loadScript(src) {
+  return new Promise((res, rej) => {
+    if (document.querySelector(`script[src="${src}"]`)) return res();
+    const s = Object.assign(document.createElement("script"), { src, crossOrigin: "anonymous" });
+    s.onload = res; s.onerror = rej;
+    document.head.appendChild(s);
+  });
+}
+
+// ── Backend: GPU via @mediapipe/tasks-vision ──────────────────────────────────
+const TV_CDN   = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
+const TV_MODEL = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
+
+async function makeGPUBackend() {
+  const { HandLandmarker, FilesetResolver } = await import(TV_CDN);
+  const resolver  = await FilesetResolver.forVisionTasks(`${TV_CDN}/wasm`);
+  const landmarker = await HandLandmarker.createFromOptions(resolver, {
+    baseOptions: { modelAssetPath: TV_MODEL, delegate: "GPU" },
+    runningMode: "VIDEO", numHands: 2,
     minHandDetectionConfidence: 0.7,
     minHandPresenceConfidence: 0.5,
     minTrackingConfidence: 0.5,
   });
-})();
+  return {
+    targetMs: 66,  // ~15 fps
+    detect(canvas) {
+      const r = landmarker.detectForVideo(canvas, performance.now());
+      return (r.landmarks ?? []).map((lm, i) => ({
+        handedness: r.handednesses[i][0].categoryName,
+        landmarks:  lm,  // already normalized 0–1
+      }));
+    },
+    destroy() { landmarker.close(); },
+  };
+}
+
+// ── Backend: CPU/WASM via TF.js + hand-pose-detection ────────────────────────
+const CDN = "https://cdn.jsdelivr.net/npm";
+
+async function makeCPUBackend(PROC_W, PROC_H) {
+  await loadScript(`${CDN}/@tensorflow/tfjs@4.20.0/dist/tf.min.js`);
+  await loadScript(`${CDN}/@tensorflow/tfjs-backend-wasm@4.20.0/dist/tf-backend-wasm.min.js`);
+  await loadScript(`${CDN}/@tensorflow-models/hand-pose-detection@2.0.1/dist/hand-pose-detection.min.js`);
+
+  try { await tf.setBackend("wasm"); }
+  catch { await tf.setBackend("cpu"); }
+  await tf.ready();
+  console.log("TF.js backend:", tf.getBackend());
+
+  const detector = await handPoseDetection.createDetector(
+    handPoseDetection.SupportedModels.MediaPipeHands,
+    { runtime: "tfjs", modelType: "lite" }
+  );
+  return {
+    targetMs: 120,  // ~8 fps
+    async detect(canvas) {
+      const hands = await detector.estimateHands(canvas, { flipHorizontal: false });
+      return hands.map(h => ({
+        handedness: h.handedness,
+        landmarks:  h.keypoints.map(kp => ({ x: kp.x / PROC_W, y: kp.y / PROC_H })),
+      }));
+    },
+    destroy() {},
+  };
+}
 
 // ── Public API ────────────────────────────────────────────────────────────────
 export async function startCamera(videoEl, canvasEl, onGesture, onReady) {
-  // 1. Request camera permission first — prompt appears immediately on click.
   const stream = await navigator.mediaDevices.getUserMedia({
     video: { width: 640, height: 480, facingMode: "user" },
   });
@@ -119,61 +166,76 @@ export async function startCamera(videoEl, canvasEl, onGesture, onReady) {
   videoEl.style.display = canvasEl.style.display = "block";
   onReady?.();
 
-  // 2. Wait for MediaPipe — usually already done from preload.
-  await _mpReady;
-
-  // Offscreen canvas for flip + downscale (matches Python's cv2.flip + resize).
+  const PROC_W = 320, PROC_H = 240;
+  const ctx   = canvasEl.getContext("2d");
   const mpCv  = Object.assign(document.createElement("canvas"), { width: PROC_W, height: PROC_H });
   const mpCtx = mpCv.getContext("2d");
-  const ctx   = canvasEl.getContext("2d");
 
-  let running = true, animId = null, lastResults = null;
+  // Pick backend: GPU for any real device, CPU/WASM for WSL2/no-GPU environments
+  let backend;
+  if (hasWebGL2()) {
+    try {
+      backend = await makeGPUBackend();
+      console.log("Using GPU backend (tasks-vision)");
+    } catch (e) {
+      console.warn("GPU backend failed, falling back to CPU:", e.message);
+      backend = await makeCPUBackend(PROC_W, PROC_H);
+    }
+  } else {
+    console.log("WebGL 2 unavailable — using CPU/WASM backend");
+    backend = await makeCPUBackend(PROC_W, PROC_H);
+  }
 
-  // ── Render loop: redraws cached landmarks at ~60 fps ─────────────────────
+  let running = true, animId = null, lastHands = null;
+
+  // Render loop: redraws cached landmarks at ~60 fps (smooth regardless of backend)
   function renderLoop() {
     const w = videoEl.videoWidth, h = videoEl.videoHeight;
     if (w && h) {
-      if (canvasEl.width  !== w) canvasEl.width  = w;  // only on resolution change
+      if (canvasEl.width  !== w) canvasEl.width  = w;
       if (canvasEl.height !== h) canvasEl.height = h;
       ctx.clearRect(0, 0, w, h);
-      if (lastResults?.landmarks) {
-        lastResults.landmarks.forEach((lm, i) => {
-          const isRight = lastResults.handednesses[i][0].categoryName === "Right";
-          drawHand(ctx, lm, isRight, w, h);
-        });
+      if (lastHands) {
+        lastHands.forEach(({ handedness, landmarks: lm }) =>
+          drawHand(ctx, lm, handedness === "Right", w, h)
+        );
       }
     }
     if (running) animId = requestAnimationFrame(renderLoop);
   }
 
-  // ── Detection loop: runs MediaPipe then yields so the browser can paint ────
+  // Detection loop: runs at backend's target fps
   async function detectLoop() {
     while (running) {
       const t0 = performance.now();
       const w  = videoEl.videoWidth, h = videoEl.videoHeight;
-
       if (w && h) {
         mpCtx.save();
         mpCtx.translate(PROC_W, 0); mpCtx.scale(-1, 1);
         mpCtx.drawImage(videoEl, 0, 0, PROC_W, PROC_H);
         mpCtx.restore();
 
-        lastResults = handLandmarker.detectForVideo(mpCv, performance.now());
+        try {
+          const hands = await backend.detect(mpCv);
+          lastHands = hands;
 
-        let loco = LocoGesture.UNKNOWN, arm = ArmGesture.UNKNOWN;
-        if (lastResults.landmarks) {
-          lastResults.landmarks.forEach((lm, i) => {
-            const hedness = lastResults.handednesses[i][0].categoryName;
-            if (hedness === "Right") loco = recognizeLoco(lm, hedness);
-            else                     arm  = recognizeArm(lm, hedness);
-          });
+          let loco = LocoGesture.UNKNOWN, arm = ArmGesture.UNKNOWN;
+          for (const { handedness, landmarks: lm } of hands) {
+            if (handedness === "Right") loco = recognizeLoco(lm, handedness);
+            else                        arm  = recognizeArm(lm, handedness);
+          }
+          onGesture?.({ loco, arm });
+        } catch (e) {
+          console.warn("Detection error, switching to CPU:", e.message);
+          // GPU backend crashed at runtime — swap to CPU and continue
+          if (backend.targetMs === 66) {
+            backend = await makeCPUBackend(PROC_W, PROC_H);
+          }
         }
-        onGesture?.({ loco, arm });
       }
-
-      // Yield to the browser — this is what keeps the render loop smooth.
-      await new Promise(r => setTimeout(r, Math.max(16, DETECT_MS - (performance.now() - t0))));
+      await new Promise(r => setTimeout(r, Math.max(16, backend.targetMs - (performance.now() - t0))));
     }
+    backend.destroy();
   }
 
   animId = requestAnimationFrame(renderLoop);

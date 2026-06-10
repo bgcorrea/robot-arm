@@ -1,3 +1,4 @@
+import os
 import platform
 import time
 from enum import Enum, auto
@@ -5,14 +6,34 @@ from megapi import MegaPi
 from gesture.recognizer import LocoGesture, ArmGesture
 
 # ── Auto-detección del puerto serial ─────────────────────────────────────────
+# Prioridad: ROBOT_PORT env var > USB > Bluetooth > default de plataforma
+_USB_HINTS = ("ch340", "ch341", "megapi", "usb serial", "usb-serial", "cp210", "ftdi")
+_BT_HINTS  = ("bluetooth", "rfcomm", "hc-05", "hc-06", "bth", "makeblock bt")
+
 def _find_serial_port() -> str:
+    override = os.getenv("ROBOT_PORT", "").strip()
+    if override:
+        return override
+
     try:
         import serial.tools.list_ports
+        usb, bt = None, None
         for p in serial.tools.list_ports.comports():
-            if any(k in p.description.lower() for k in ("ch340", "ch341", "megapi", "usb serial")):
-                return p.device
+            desc = (p.description or "").lower()
+            if not usb and any(k in desc for k in _USB_HINTS):
+                usb = p.device
+            if not bt and any(k in desc for k in _BT_HINTS):
+                bt = p.device
+        if usb:
+            return usb
+        if bt:
+            return bt
     except Exception:
         pass
+
+    # WSL2: los COM ports de Bluetooth de Windows aparecen como /dev/ttyS<n>.
+    # Si ROBOT_PORT no está seteado y no se detectó nada arriba, es necesario
+    # setear ROBOT_PORT=COM<n> (Windows) o ROBOT_PORT=/dev/ttyS<n> (WSL2).
     return {"Windows": "COM3", "Darwin": "/dev/tty.usbserial-1420"}.get(
         platform.system(), "/dev/ttyUSB0"
     )

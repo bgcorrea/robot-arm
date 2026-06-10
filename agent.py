@@ -29,6 +29,14 @@ from robot.controller import RobotController
 RELAY_URL  = os.getenv("RELAY_URL", "").strip()
 CONTROL_HZ = 30  # rate at which we tick the robot control loop (keeps gripper state machine alive)
 
+def _parse_args():
+    import argparse
+    p = argparse.ArgumentParser(description="Robot agent — conecta al relay y controla el robot.")
+    p.add_argument("--port", default=None,
+                   help="Puerto serial explícito (ej: /dev/ttyUSB0, /dev/ttyS7, COM5). "
+                        "Equivalente a setear ROBOT_PORT.")
+    return p.parse_args()
+
 
 async def _session(relay_url: str, robot: RobotController | None) -> None:
     """Single WebSocket session: exits on disconnect, caller retries."""
@@ -83,18 +91,25 @@ async def _run_forever(relay_url: str, robot: RobotController | None) -> None:
 
 
 def main() -> None:
+    args = _parse_args()
+
     if not RELAY_URL:
         print("ERROR: RELAY_URL not set.")
         print("  export RELAY_URL=wss://your-app.railway.app/ws/agent")
         sys.exit(1)
 
+    # --port flag overrides ROBOT_PORT env var and auto-detection
+    if args.port:
+        os.environ["ROBOT_PORT"] = args.port
+
     robot: RobotController | None = None
     try:
         robot = RobotController()
+        print(f"Conectando al robot en {robot._port}…")
         robot.connect()
-        print("Robot connected.")
+        print("Robot conectado.")
     except Exception as exc:
-        print(f"Robot unavailable ({exc}) — demo mode (no hardware)")
+        print(f"Robot no disponible ({exc}) — modo demo (sin hardware)")
 
     try:
         asyncio.run(_run_forever(RELAY_URL, robot))

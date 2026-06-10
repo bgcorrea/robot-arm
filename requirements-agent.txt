@@ -1,0 +1,8 @@
+# Dependencias del agente local (agent.py) y app de cámara (app.py)
+# Instalar en el entorno local: pip install -r requirements-agent.txt
+numpy==1.26.4
+opencv-python==4.9.0.80
+mediapipe==0.10.9
+megapi==0.2.2
+pyserial
+websockets>=12.0
