@@ -93,9 +93,12 @@ function send(loco, arm) {
 }
 
 // ── UI helpers ────────────────────────────────────────────────────────────────
+const downloadPanel = document.getElementById("download-panel");
+
 function setRobotStatus(online) {
-  robotDot.className   = `dot ${online ? "online" : ""}`;
+  robotDot.className     = `dot ${online ? "online" : ""}`;
   robotLabel.textContent = online ? "Robot conectado" : "Robot offline";
+  downloadPanel.style.display = online ? "none" : "flex";
 }
 
 function setCameraStatus(active) {
