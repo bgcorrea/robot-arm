@@ -9,6 +9,7 @@ GET /health      — liveness probe
 GET /*           — static frontend (web/)
 """
 import json
+from pathlib import Path
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -91,4 +92,5 @@ async def health() -> dict:
 
 
 # Static files must be mounted last (catch-all)
-app.mount("/", StaticFiles(directory="web", html=True), name="static")
+_WEB_DIR = Path(__file__).parent.parent / "web"
+app.mount("/", StaticFiles(directory=str(_WEB_DIR), html=True), name="static")

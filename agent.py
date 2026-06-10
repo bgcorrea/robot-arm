@@ -17,6 +17,21 @@ import json
 import os
 import sys
 import traceback
+from pathlib import Path
+
+
+def _load_dotenv() -> None:
+    env_file = Path(__file__).parent / ".env"
+    if not env_file.exists():
+        return
+    for line in env_file.read_text().splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            k, _, v = line.partition("=")
+            os.environ.setdefault(k.strip(), v.strip())
+
+
+_load_dotenv()
 
 try:
     import websockets
