@@ -84,7 +84,7 @@ async def _session(relay_url: str, robot: RobotController | None) -> None:
 
     async def ws_loop() -> None:
         print(f"Connecting to relay: {relay_url}")
-        async with websockets.connect(relay_url) as ws:
+        async with websockets.connect(relay_url, ping_interval=20, ping_timeout=20) as ws:
             print("Relay connected — waiting for commands…")
             async for raw in ws:
                 try:

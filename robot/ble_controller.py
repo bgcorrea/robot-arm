@@ -6,10 +6,7 @@ Requiere bleak (pip install bleak) y ejecutarse en Windows (no WSL2).
 Variables de entorno:
   BLE_DEVICE       Nombre parcial del dispositivo a buscar   (default: "Makeblock")
   BLE_ADDRESS      Dirección MAC BLE (omite el escaneo)      (optional)
-  BLE_WRITE_UUID   UUID de la característica de escritura    (default: NUS RX)
-
-Si BLE_WRITE_UUID no está seteado, se usa el UUID del Nordic UART Service (NUS) RX,
-que es el más común en módulos serial-over-BLE.  Ejecuta scan_ble.py para confirmarlo.
+  BLE_WRITE_UUID   UUID de la característica de escritura    (default: FFE3 de Makeblock)
 """
 import asyncio
 import os
@@ -21,7 +18,6 @@ from bleak import BleakClient, BleakScanner
 from gesture.recognizer import ArmGesture, LocoGesture
 from robot.protocol import encoder_motor_run, encoder_motor_set_pos_zero
 
-# Makeblock BLE module (HM-10 compatible): service FFE1, write char FFE3
 _MAKEBLOCK_WRITE = "0000ffe3-0000-1000-8000-00805f9b34fb"
 
 BLE_DEVICE     = os.getenv("BLE_DEVICE", "Makeblock")
@@ -51,12 +47,16 @@ class _GripState(Enum):
 class BleRobotController:
 
     def __init__(self, address: str = BLE_ADDRESS, write_uuid: str = BLE_WRITE_UUID):
-        self._address    = address or None
-        self._write_uuid = write_uuid
+        self._address      = address or None
+        self._write_uuid   = write_uuid
         self._client: BleakClient | None = None
-        self._grip_state = _GripState.IDLE
-        self._grip_start = 0.0
-        self._grip_armed = True
+        self._reconnecting = False
+        self._grip_state   = _GripState.IDLE
+        self._grip_start   = 0.0
+        self._grip_armed   = True
+        # Deduplication: last sent gesture — evita writes repetidos al módulo BLE
+        self._last_loco: LocoGesture | None = None
+        self._last_arm:  ArmGesture  | None = None
         self._loco_dispatch = {
             LocoGesture.STOP:       self.stop,
             LocoGesture.FORWARD:    self._forward,
@@ -71,10 +71,30 @@ class BleRobotController:
         if not self._address:
             self._address = await self._scan_for_device()
         print(f"Conectando a {self._address} via BLE...")
-        self._client = BleakClient(self._address)
+        self._client = BleakClient(self._address, disconnected_callback=self._on_disconnected)
         await self._client.connect()
         print(f"BLE conectado. UUID escritura: {self._write_uuid}")
         await self._calibrate_gripper()
+
+    def _on_disconnected(self, client: BleakClient) -> None:
+        print("BLE desconectado — se intentará reconectar en el próximo comando.")
+        self._last_loco = None
+        self._last_arm  = None
+
+    async def _try_reconnect(self) -> None:
+        if self._reconnecting:
+            return
+        self._reconnecting = True
+        print("Reconectando BLE...")
+        try:
+            self._client = BleakClient(self._address, disconnected_callback=self._on_disconnected)
+            await self._client.connect()
+            print("BLE reconectado.")
+        except Exception as exc:
+            print(f"Error reconectando: {exc}")
+            self._client = None
+        finally:
+            self._reconnecting = False
 
     async def _scan_for_device(self) -> str:
         print(f"Escaneando BLE para '{BLE_DEVICE}'...")
@@ -90,8 +110,14 @@ class BleRobotController:
         )
 
     async def _write(self, data: bytes) -> None:
+        if not self._client or not self._client.is_connected:
+            await self._try_reconnect()
         if self._client and self._client.is_connected:
-            await self._client.write_gatt_char(self._write_uuid, data, response=False)
+            try:
+                await self._client.write_gatt_char(self._write_uuid, data, response=False)
+            except Exception as exc:
+                print(f"Error escribiendo BLE: {exc}")
+                self._client = None  # fuerza reconexión en el próximo write
 
     async def _calibrate_gripper(self) -> None:
         print("Calibrando pinza...")
@@ -114,6 +140,9 @@ class BleRobotController:
     # ── Orugas ────────────────────────────────────────────────────────────────
 
     async def apply_loco(self, gesture: LocoGesture) -> None:
+        if gesture == self._last_loco:
+            return  # sin cambio, no escribe
+        self._last_loco = gesture
         fn = self._loco_dispatch.get(gesture)
         if fn:
             await fn()
@@ -148,16 +177,22 @@ class BleRobotController:
             await self._write(encoder_motor_run(GRIPPER_SLOT, 0))
             await self._write(encoder_motor_set_pos_zero(GRIPPER_SLOT))
             self._grip_state = _GripState.IDLE
+            self._last_arm   = None  # fuerza reenvío del siguiente gesto
             print("Pinza abierta.")
         elif self._grip_state == _GripState.CLOSING and elapsed >= GRIPPER_CLOSE_TIME:
             await self._write(encoder_motor_run(GRIPPER_SLOT, 0))
             await self._write(encoder_motor_set_pos_zero(GRIPPER_SLOT))
             self._grip_state = _GripState.IDLE
             self._grip_armed = True
+            self._last_arm   = None
             print("Pinza cerrada — lista para abrir.")
 
     async def apply_arm(self, gesture: ArmGesture) -> None:
         await self._update_gripper()
+
+        if gesture == self._last_arm:
+            return  # sin cambio, no escribe
+        self._last_arm = gesture
         active = self._grip_state != _GripState.IDLE
 
         if gesture == ArmGesture.SHOULDER_UP:
