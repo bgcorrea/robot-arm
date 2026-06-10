@@ -52,6 +52,8 @@ const locoName   = document.getElementById("loco-name");
 const locoDesc   = document.getElementById("loco-desc");
 const armName    = document.getElementById("arm-name");
 const armDesc    = document.getElementById("arm-desc");
+const camCta     = document.getElementById("cam-cta");
+if (camCta) camCta.addEventListener("click", () => cameraBtn.click());
 
 // ── State ─────────────────────────────────────────────────────────────────────
 let ws           = null;
@@ -103,6 +105,7 @@ function setRobotStatus(online) {
   robotDot.className     = `dot ${online ? "online" : ""}`;
   robotLabel.textContent = online ? "Robot conectado" : "Robot offline";
   downloadPanel.style.display = online ? "none" : "flex";
+  document.body.classList.toggle("robot-offline", !online);
 }
 
 function setCameraStatus(active) {
@@ -139,6 +142,7 @@ cameraBtn.addEventListener("click", async () => {
     gestureArm   = "UNKNOWN";
     noCam.style.display = "flex";
     cameraBtn.textContent = "Activar cámara";
+    if (camCta) camCta.style.display = "";
     setCameraStatus(false);
     send("UNKNOWN", "UNKNOWN");
     updateGestureUI("UNKNOWN", "UNKNOWN");
@@ -147,6 +151,7 @@ cameraBtn.addEventListener("click", async () => {
 
   cameraBtn.textContent = "Cargando MediaPipe…";
   cameraBtn.disabled    = true;
+  if (camCta) camCta.style.display = "none";
 
   try {
     if (!gestureMod) gestureMod = await gestureModPromise;
@@ -171,6 +176,7 @@ cameraBtn.addEventListener("click", async () => {
     console.error("Camera error:", err);
     cameraBtn.textContent = "Error — reintentar";
     cameraBtn.disabled    = false;
+    if (camCta) camCta.style.display = "";
   }
 });
 
