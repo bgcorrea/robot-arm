@@ -33,17 +33,26 @@ jobs:
       - name: Compilar
         run: python build/build.py
 
+      - name: Crear lanzador Mac (.command)
+        if: matrix.os == 'macos-latest'
+        run: |
+          cat > dist/robot-agent.command << 'EOF'
+          #!/bin/bash
+          DIR="$(cd "$(dirname "$0")" && pwd)"
+          AGENT="$DIR/robot-agent"
+          if [ ! -f "$AGENT" ]; then
+            echo "Error: robot-agent no encontrado en $DIR"
+            echo "Descargalo y ponelo en la misma carpeta que este archivo."
+            read -p "Presioná Enter para salir..."
+            exit 1
+          fi
+          chmod +x "$AGENT"
+          "$AGENT"
+          read -p "Presioná Enter para cerrar..."
+          EOF
+          chmod +x dist/robot-agent.command
+
       - name: Subir a Release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/${{ matrix.artifact }}
-          body: |
-            ## Cómo usar
-
-            1. Descargá el archivo para tu sistema operativo
-            2. Creá un archivo `.env` en la misma carpeta con:
-               ```
-               RELAY_URL=wss://robot-arm-test.up.railway.app/ws/agent
-               BLE_ADDRESS=70:3E:97:93:29:A5
-               ```
-            3. Doble click en el ejecutable — conecta el robot automáticamente
+          files: dist/${{ matrix.artifact }}*

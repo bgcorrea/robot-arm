@@ -94,6 +94,10 @@ function send(loco, arm) {
 
 // ── UI helpers ────────────────────────────────────────────────────────────────
 const downloadPanel = document.getElementById("download-panel");
+const macHint       = document.getElementById("mac-hint");
+if (/mac/i.test(navigator.platform || navigator.userAgent)) {
+  macHint.style.display = "block";
+}
 
 function setRobotStatus(online) {
   robotDot.className     = `dot ${online ? "online" : ""}`;
